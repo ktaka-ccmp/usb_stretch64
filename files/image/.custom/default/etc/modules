@@ -1,0 +1,10 @@
+e1000e
+igb
+
+usbhid
+
+uhci-hcd
+ohci-hcd
+ehci-hcd
+
+

@@ -1,0 +1,236 @@
+#!/bin/bash
+
+base=rootfs.tgz
+config=config.tgz
+home=home.tgz
+
+usage(){
+	echo "Usage: $0 (save | del | change | config | list)"
+}
+
+num_set(){
+	case "$num" in
+		[0-5])
+		backup=$base.$num
+		config_backup=$config.$num
+		;;
+
+		*)
+		echo "Invalid slot number"
+		umount_dev
+		exit 1
+		;;
+	esac
+}
+
+delete_image(){
+	echo "Which do you want to delete [1-5]"
+	echo -n "slot number: "
+	read num 
+
+	num_set
+
+	if [ "$num" == "0" ]; then 
+		echo "You can't delete 0"
+		exit_umount
+	fi
+
+	if [ -e /mnt/root/$backup ]; then
+	
+		current=`readlink /mnt/root/$base | sed -e "s/$base\.//g"`
+		if [ "$num" == "$current" ]; then 
+			echo "Slot $num is current image"
+			echo "Do, $0 change, first"
+			exit_umount
+		fi
+
+		echo Deleteing backup file $num
+		echo Are you sure ? [y/N]
+		read ans
+		if [ "$ans" != "y" ]; then
+			echo Aborting
+			exit_umount
+		fi
+
+		rm -f /mnt/root/$backup
+		rm -f /mnt/root/$config_backup
+	fi
+}
+
+save_image(){
+	echo "Choose backup slot [1-5]"
+	echo -n "slot number: "
+	read num 
+
+	num_set
+
+	if [ "$num" == "0" ]; then 
+		echo "You can't overwrite 0"
+		exit_umount
+	fi
+
+	mount -o bind / /mnt/bind
+
+	if [ -e /mnt/root/$backup ]; then
+		echo Overwriting existing backup file
+		echo Are you sure ? [y/N]
+		read ans
+		if [ "$ans" != "y" ]; then
+			echo Aborting
+			exit_umount
+		fi
+	fi
+
+	apt-get clean
+	
+	echo Creating backup image ...
+	echo -n "This may take up to 60 seconds... "
+
+cat << EOF > /tmp/exclude
+./lib/modules 
+./var/log 
+./var/cache/apt 
+./tmp/exclude 
+./home
+./root
+EOF
+
+	(cd /mnt/bind; tar cf - --exclude-from=/tmp/exclude . )|gzip > /mnt/root/$backup
+	rm -f /tmp/exclude
+	(cd /mnt/bind; tar cf - root home )|gzip > /mnt/root/$home
+	(cd /mnt/bind; tar cf - etc)|gzip > /mnt/root/$config_backup
+
+	rm -f /mnt/root/$base
+	(cd /mnt/root; ln -s $backup $base )
+
+	rm -f /mnt/root/$config
+	(cd /mnt/root; ln -s $config_backup $config )
+
+	umount /mnt/bind
+
+	echo done
+}
+
+change_image(){
+	echo "Type startup image and config [0-5]"
+	echo -n "slot number: "
+	read num 
+
+	num_set
+
+	if [ -e /mnt/root/$backup ] && [ -e /mnt/root/$config_backup ]; then
+		rm -f /mnt/root/$base
+		(cd /mnt/root; ln -s $backup $base )
+
+		rm -f /mnt/root/$config
+		(cd /mnt/root; ln -s $config_backup $config )
+	else
+		echo "Slot $num doesn't exist"
+	fi
+}
+
+change_config(){
+	echo "Type startup config [0-5]"
+	echo -n "slot number: "
+	read num 
+
+	num_set
+
+	if [ -e /mnt/root/$config_backup ]; then
+		rm -f /mnt/root/$config
+		(cd /mnt/root; ln -s $config_backup $config )
+	else
+		echo "Slot $num doesn't exist"
+	fi
+}
+
+list_image(){
+
+	echo
+
+	echo "Backup storage usage:"
+	echo -e "\tFilesystem   Used   Free   %"
+	df -m /dev/sda1 |egrep -v "Filesystem"| awk '{print "\t"$1"    "$3"MB   "$4"MB  "$5}'
+
+	echo "Image list"
+	echo -e "\tSlotId size[byte] date"
+	(cd /mnt/root/; ls -la ${base}.* | sed -e "s/$base\.//g" | awk '{print "\t"$9"      "$5"   "$6" "$7" "$8}' )
+	echo -en "\tStartup image ==> "
+	readlink /mnt/root/$base | sed -e "s/$base\.//g"
+
+	echo "Config list"
+	echo -e "\tSlotId size[byte] date"
+	(cd /mnt/root/; ls -la ${config}.* | sed -e "s/$config\.//g" | awk '{print "\t"$9"      "$5"   "$6" "$7" "$8}' )
+	echo -en "\tStartup config ==> "
+	readlink /mnt/root/$config | sed -e "s/$config\.//g"
+	
+	echo
+
+}
+
+mount_dev(){
+	mount -L usbdebian /mnt/root >/dev/null 2>&1
+	if [ "$?" != "0" ]; then
+		echo mount failure
+		exit_umount
+	fi
+	sleep 0.2
+}
+
+umount_dev(){
+	echo -n "syncing .... "
+	sync
+	echo done
+
+	umount /mnt/root
+}
+
+exit_umount(){
+	umount_dev
+	exit 1
+}
+
+case "$1" in
+	save)
+	mount_dev
+	list_image
+	save_image
+	list_image
+	umount_dev
+	;;
+
+	del)
+	mount_dev
+	list_image
+	delete_image
+	list_image
+	umount_dev
+	;;
+
+	config)
+	mount_dev
+	list_image
+	change_config
+	list_image
+	umount_dev
+	;;
+
+	change)
+	mount_dev
+	list_image
+	change_image
+	list_image
+	umount_dev
+	;;
+
+	list)
+	mount_dev
+	list_image
+	umount_dev
+	;;
+
+	*)
+	usage; exit 1
+	;;
+esac
+

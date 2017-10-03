@@ -1,0 +1,30 @@
+#!/bin/ash
+
+echo "Mounting tmpfs on /sysroot"
+mount -t tmpfs tmpfs /sysroot
+
+echo -n "Sleeping for 10 seconds."
+for i in `seq 1 10` ; do
+	sleep 1
+	echo -n "."
+done
+echo
+
+mount -t ext3 /dev/sda1 /mnt
+
+tar -zxf /mnt/rootfs.tgz -C /sysroot
+tar -zxf /mnt/config.tgz -C /sysroot
+tar -zxf /mnt/modules.tgz -C /sysroot
+if [ -e /mnt/home.tgz ]; then
+	tar -zxf /mnt/home.tgz -C /sysroot
+fi
+
+if [ $(readlink /mnt/config.tgz) == "config.tgz.0" ]; then
+	(cd /mnt/custom; tar cf - .)|tar xf - -C /sysroot
+	(cd /mnt/script; tar cf - .)|tar xf - -C /sysroot
+fi 
+
+umount /mnt
+
+exec switch_root -c /dev/console /sysroot /sbin/init
+

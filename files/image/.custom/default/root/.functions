@@ -1,0 +1,26 @@
+bk()
+{
+file=${1##*/}
+dir=${1%${1##*/}}
+(
+if [ "$dir" = "" ]; then
+        true
+elif [ -d "$dir" ]; then
+        echo cd $dir
+        cd $dir
+else
+        echo "No such directory: $dir "
+        return 1
+fi
+
+if [ -f "$file" ]; then
+        mkdir -p .bk
+        echo cp -p $file .bk/$file.$(date +"%Y%m%d%H%M" -r $file)
+        cp -p $file .bk/$file.$(date +"%Y%m%d%H%M" -r $file)
+else
+        echo "No such file: $file "
+fi
+)
+}
+
+
