@@ -2,10 +2,15 @@
 TOP_DIR=${PWD}
 IMG_DIR=${TOP_DIR}/Build/image/
 SRC_DIR=${TOP_DIR}/Build/src/
-FILE_DIR=${TOP_DIR}/file/
+FILE_DIR=${TOP_DIR}/files/
 
-KVER=4.13.4
+KERNEL_URI=http://www.kernel.org/pub/linux/kernel/v4.x/linux-4.13.4.tar.xz
+KERNEL_FILE=$(notdir ${KERNEL_URI})
+KERNEL=$(KERNEL_FILE:.tar.xz=)
+KVER=$(subst linux-,,${KERNEL})
 KVER_MINOR=-64usb01
+
+DEBIAN=stretch
 
 BUSYBOX_URI=http://busybox.net/downloads/busybox-1.27.2.tar.bz2
 BUSYBOX_FILE=$(notdir ${BUSYBOX_URI})
@@ -20,8 +25,8 @@ default:
 	@echo -e "\t all		: Make all files"
 	@echo -e "\t "
 	@echo -e "\t kernel		: Compile kernel"
-	@echo -e "\t initrd.img			: Create initrd image"
-	@echo -e "\t rootfs.tgz			: Create rootfs archive"
+	@echo -e "\t initrd		: Create initrd image"
+	@echo -e "\t rootfs		: Create rootfs archive"
 	@echo -e "\t "
 	@echo -e " Other Targets "
 	@echo -e "\t update:"
@@ -32,9 +37,12 @@ default:
 .PHONY: default
 
 all: 
-	make initrd.img
-	make rootfs.tgz
+	make initrd
+	make rootfs
 	make kernel
+
+rootfs: rootfs.tgz
+initrd: initrd.img
 
 .PHONY: all kernel  
 .PHONY: install install-kernel install-rootfs 
@@ -53,23 +61,23 @@ update:
 	umount ${TOP_DIR}/mnt
 
 .PHONY: ${SRC_DIR}
-${SRCE_DIR}:
+${SRC_DIR}:
 	mkdir -p $@
 
-.PHONY: ${IMAGE_DIR}
-${IMAGE_DIR}:
+.PHONY: ${IMG_DIR}
+${IMG_DIR}:
 	if [ ! -d $@ ] ; then mkdir -p $@ && rsync -av ${FILE_DIR}/image/ $@  ; fi
 
 .PHONY: initrd.img
-initrd.img: ${SRC_DIR}/initrd-usb-cpio ${IMAGE_DIR}
+initrd.img: ${SRC_DIR}/initrd-usb-cpio ${IMG_DIR}
+	cp ${FILE_DIR}/init $</
 	(cd $< ;find . | cpio -o -H newc | gzip -9 -n > ${IMG_DIR}/boot/initrd.img)
 
 .PHONY: ${SRC_DIR}/initrd-usb-cpio
 ${SRC_DIR}/initrd-usb-cpio: ${SRC_DIR}/${BUSYBOX}/_install 
 	mkdir -p $@
 	rsync -a --delete $</ $@/
-	mkdir -p $@/{sysroot,proc,sys,dev}
-	cp ${FILE_DIR}/init $@
+	(cd $@; mkdir -p sysroot proc sys dev mnt)
 
 .PHONY: ${SRC_DIR}/${BUSYBOX}/_install
 ${SRC_DIR}/${BUSYBOX}/_install: ${SRC_DIR}
@@ -96,34 +104,38 @@ ${SRC_DIR}/rootfs_${DEBIAN}:
 	sudo,aptitude,ca-certificates,apt-transport-https,\
 	less,screen,ethtool,sysstat,tzdata,libpam0g,\
 	sudo \
-	stretch $@/ http://deb.debian.org/debian ; \
-	echo "root:usb" | chpasswd --root ${TOP_DIR}/mnt/tmp/ ; \
+	${DEBIAN} $@/ http://deb.debian.org/debian ; \
+	echo "root:usb" | chpasswd --root $@/ ; \
 	apt-get -o RootDir=$@/ clean ;\
 
-kernel: ${SRC_DIR}/linux-${KVER}/.config
-	ARCH=x86_64 nice -n 10 make -C ${SRC_DIR}/linux-${KVER} -j20
-	ARCH=x86_64 make -C ${SRC_DIR}/linux-${KVER} modules_install INSTALL_MOD_PATH=${SRC_DIR} ; \
+	(cd ${SRC_DIR}/linux-${KVER}/; tar zcf ${FILE_DIR}/kernel.config.tgz .config; touch .config)
+
+kernel: ${SRC_DIR}/${KERNEL}/.config ${IMG_DIR}
+	ARCH=x86_64 nice -n 10 make -C ${SRC_DIR}/${KERNEL} -j20
+	ARCH=x86_64 make -C ${SRC_DIR}/${KERNEL} modules_install INSTALL_MOD_PATH=${SRC_DIR} ; \
+	LD_LIBRARY_PATH=${SRC_DIR} depmod -a -b ${SRC_DIR} ${KVER}${KVER_MINOR}
 	(cd ${SRC_DIR}; tar cf - lib/modules/${KVER}${KVER_MINOR} | gzip > ${IMG_DIR}/modules.tgz ;\
 	rm -rf lib )
-	ARCH=x86_64 make -C ${SRC_DIR}/linux-${KVER} install INSTALL_PATH=${IMG_DIR}/boot/
-	(cd ${SRC_DIR}/linux-${KVER}/; tar zcf ${FILE_DIR}/kernel.config.tgz .config; touch .config)
+	ARCH=x86_64 make -C ${SRC_DIR}/${KERNEL} install INSTALL_PATH=${IMG_DIR}/boot/
+	(cd ${IMG_DIR}/boot/; ln -sf vmlinuz-${KVER}${KVER_MINOR} vmlinuz )
+	(cp ${SRC_DIR}/${KERNEL}/.config ${FILE_DIR}/dot.config.kernel ; touch ${SRC_DIR}/${KERNEL}/.config)
 
-${SRC_DIR}/linux-${KVER}/.config: ${FILE_DIR}/kernel.config.tgz
-	if [ ! -d ${SRC_DIR}/linux-${KVER} ]; then \
-	(cd kernel/ ; wget http://www.kernel.org/pub/linux/kernel/v4.x/linux-${KVER}.tar.xz; \
-	tar -xf linux-${KVER}.tar.xz; ) ; fi
-	(cd ${SRC_DIR}/linux-${KVER}/; tar -zxvf ${FILE_DIR}/kernel.config.tgz; \
-	cp -v .config .config.tmp ;\
+.PHONY: ${SRC_DIR}/${KERNEL}/.config
+${SRC_DIR}/${KERNEL}/.config: ${FILE_DIR}/dot.config.kernel ${SRC_DIR}
+	if [ ! -d ${SRC_DIR}/${KERNEL} ]; then \
+	(wget -c ${KERNEL_URI} ;\
+	tar xf ${KERNEL_FILE} -C ${SRC_DIR}; rm ${KERNEL_FILE}) ; fi
+	sed -e 's/^CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION=\"${KVER_MINOR}\"/g' ${FILE_DIR}/dot.config.kernel > ${SRC_DIR}/${KERNEL}/.config
+	ARCH=x86_64 make -C ${SRC_DIR}/${KERNEL} menuconfig
+	(cd ${SRC_DIR}/${KERNEL}/; cp -v  .config .config.tmp ;\
 	sed -e 's/^CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION=\"${KVER_MINOR}\"/g' .config.tmp > .config ;\
 	rm .config.tmp )
-	ARCH=x86_64 make -C ${SRC_DIR}/linux-${KVER} menuconfig
-	(cd ${SRC_DIR}/linux-${KVER}/; cp -v  .config .config.tmp ;\
-	sed -e 's/^CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION=\"${KVER_MINOR}\"/g' .config.tmp > .config ;\
-	rm .config.tmp )
-	(cd ${SRC_DIR}/linux-${KVER}/; tar zcf ${FILE_DIR}/kernel.config.tgz .config; touch .config)
-
+	cp ${SRC_DIR}/${KERNEL}/.config ${FILE_DIR}/dot.config.kernel
 
 .PHONY: clean
 clean:
 	rm -rf ${TOP_DIR}/Build
+	if mountpoint ${TOP_DIR}/mnt > /dev/null  ; then \
+		umount ${TOP_DIR}/mnt ; fi 
+	rm -rf ${TOP_DIR}/mnt 
 

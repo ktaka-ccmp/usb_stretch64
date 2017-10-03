@@ -10,7 +10,8 @@ for i in `seq 1 10` ; do
 done
 echo
 
-mount -t ext3 /dev/sda1 /mnt
+mount -t devtmpfs devtmpfs /dev
+mount -t ext4 /dev/sda1 /mnt
 
 tar -zxf /mnt/rootfs.tgz -C /sysroot
 tar -zxf /mnt/config.tgz -C /sysroot
@@ -25,6 +26,7 @@ if [ $(readlink /mnt/config.tgz) == "config.tgz.0" ]; then
 fi 
 
 umount /mnt
+umount /dev
 
 exec switch_root -c /dev/console /sysroot /sbin/init
 
