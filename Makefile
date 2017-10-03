@@ -97,7 +97,8 @@ rootfs.tgz: ${SRC_DIR}/rootfs_${DEBIAN} ${IMG_DIR}
 
 .PHONY: ${SRC_DIR}/rootfs_${DEBIAN}
 ${SRC_DIR}/rootfs_${DEBIAN}:
-	if [ -d $@ ]; then rm -rf ${SRC_DIR}/rootfs_${DEBIAN} && mkdir -p $@ ; fi
+	if [ ! -d $@ ]; then \
+	mkdir -p $@ ; \
 	debootstrap --include=openssh-server,openssh-client,rsync,pciutils,\
 	tcpdump,strace,libpam-systemd,ca-certificates,telnet,curl,ncurses-term,\
 	tree,psmisc,\
@@ -107,8 +108,7 @@ ${SRC_DIR}/rootfs_${DEBIAN}:
 	${DEBIAN} $@/ http://deb.debian.org/debian ; \
 	echo "root:usb" | chpasswd --root $@/ ; \
 	apt-get -o RootDir=$@/ clean ;\
-
-	(cd ${SRC_DIR}/linux-${KVER}/; tar zcf ${FILE_DIR}/kernel.config.tgz .config; touch .config)
+	fi
 
 kernel: ${SRC_DIR}/${KERNEL}/.config ${IMG_DIR}
 	ARCH=x86_64 nice -n 10 make -C ${SRC_DIR}/${KERNEL} -j20
