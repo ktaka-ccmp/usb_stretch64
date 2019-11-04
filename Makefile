@@ -100,10 +100,11 @@ ${SRC_DIR}/rootfs_${DEBIAN}:
 	if [ ! -d $@ ]; then \
 	mkdir -p $@ ; \
 	debootstrap --include=openssh-server,openssh-client,rsync,pciutils,\
-	tcpdump,strace,libpam-systemd,ca-certificates,telnet,curl,ncurses-term,\
+	tcpdump,strace,ca-certificates,telnet,curl,ncurses-term,\
 	tree,psmisc,\
 	sudo,aptitude,ca-certificates,apt-transport-https,\
 	less,screen,ethtool,sysstat,tzdata,libpam0g,\
+	sysvinit-core,sysvinit-utils,\
 	sudo \
 	${DEBIAN} $@/ http://deb.debian.org/debian ; \
 	echo "root:usb" | chpasswd --root $@/ ; \
